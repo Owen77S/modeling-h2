@@ -3,6 +3,9 @@ import pandas as pd
 import numpy as np  
 import matplotlib.pyplot as plt
 import random
+from utils.data_loader import load_power_data
+
+# %%
 
 class H2plant():
     def __init__(self):
@@ -53,7 +56,7 @@ class H2plant():
             "unavailable_hours" : 3, #Time for a truck to go back and forth (so we can't sell any hydrogen while trucks are not back) [hour]
             "H2_price" : 2.7, #Hydrogen price [€/kg]
             "NM3_to_kg" : 101325*2e-3/(8.314*273.15),
-            "correlation_to_reality" : 1 #2/3.49 #so that a 120kW electrolyser produce 2 kg of H2 per hour and not 3.4 as estimates our model.
+            "correlation_to_reality" : 2/3.49 #so that a 120kW electrolyser produce 2 kg of H2 per hour and not 3.4 as estimates our model.
             } 
         
         self.gas_model = {
@@ -74,7 +77,7 @@ class H2plant():
             "threshold" : 0 #Threshold above which we start selling hydrogen 0 < T < 1 [1]
             }
         
-    def get_data_from_excel(self, nb = 104, path_excel = "data_2.xlsx"):
+    def get_data_from_excel(self, nb = 104, path_excel = "data_2.csv"):
         '''
         Get the parameters (wind and nuclear power plant production) from Excel
         Update self.data
@@ -84,7 +87,7 @@ class H2plant():
             The number of wind turbines in the wind plant.
             
         path_excel : str, optional
-            The excel file path. The default is "data_2.xlsx".
+            The excel file path. The default is "data_2.csv".
 
         Returns
         -------
@@ -92,11 +95,10 @@ class H2plant():
 
         '''
         
-        wind_nuclear = pd.read_excel("data_2.xlsx",
-                                     usecols = 'A:B')
+        wind_nuclear = load_power_data()
         
-        self.data["WP"] = [nb*power for power in wind_nuclear["Wind power [kW]"].tolist()]
-        self.data["NP"] = wind_nuclear['Nuclear power plant [kW]'].tolist()
+        self.data["WP"] = wind_nuclear["WP"].tolist()
+        self.data["NP"] = wind_nuclear['NP'].tolist()
     
     
     def get_data_from_python(self, WP, NP):
@@ -121,13 +123,27 @@ class H2plant():
         self.data["WP"], self.data["NP"] = WP, NP
     
     def change_nuclear_capacity(self, NC):
+        """
+        To change the power capacity of the nuclear plant. 
+        Has to be used before power_manager() to be accounted !
+
+        Parameters
+        ----------
+        NC : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        None.
+
+        """
         tmp = self.data["NP"].copy()
         self.data["NP"] = [NC*np/1450 for np in tmp]
     
     def power_manager(self):
         """
         Get the excess electricity. !!! Need to have a nuclear and wind
-        yield production already initialized !!!
+        yield production already initialized !!! (with get_data_from_excel)
         
         -------
         None.
@@ -291,7 +307,9 @@ class H2plant():
         None.
 
         """
-
+        years = 30
+        kg_to_m3 =  1*self.param["correlation_to_reality"]*self.gas_model["R"]*(self.gas_model["T_op"]+273.15)/(self.gas_model["M"]*self.gas_model["P_op"]*10**5)
+        
         self.KPI['H2'] = sum(self.res["mass_H2"])
         total_sold_decompressed = sum(self.res["sold"])/(self.gas_model["P_op"]/self.gas_model["P_out"])**(1/self.gas_model["n"])
         self.KPI["H2_sold"] = (self.gas_model["M"]*self.gas_model["P_op"]*10**5)*total_sold_decompressed/(self.gas_model["R"]*(self.gas_model["T_op"]+273.15))
@@ -306,18 +324,110 @@ class H2plant():
         OPEX_PEM = self.economics['OPEX_PEM']*self.var['electrolyzer_capacity'] 
         water_price = self.economics['water_price']*self.economics["water_consumption"]*self.KPI['H2']
         OPEX_compressor = 4665
+        OPEX_storage = 9.385398411955556*self.var['storage_capacity']*kg_to_m3
         OPEX_selling = 30500*self.var['number_of_trucks']
-        OPEX = OPEX_PEM + water_price + OPEX_compressor + OPEX_selling
+        OPEX = OPEX_PEM + water_price + OPEX_compressor + OPEX_selling + OPEX_storage
+        
+        replacement_PEM = (years//7.6)*630*self.var['electrolyzer_capacity']
+
+        replacement_storage = (years//25)*470*self.var['storage_capacity']/kg_to_m3
+        
+        replacement = replacement_PEM + replacement_storage
+        
+        WACC = 5/100
+        eps = 0.3/100
+        num = CAPEX + replacement + sum([OPEX/(1+WACC)**n for n in range(1, years+1)])
         
         energy_in_H2 = self.KPI['H2_sold']*self.param['LHV_kg'] #kWh
+        den = energy_in_H2*sum([(1-eps)**(n-1)/(1+WACC)**n for n in range(1, years+1)])
         
-        self.KPI['LCOH'] = (CAPEX+OPEX)/energy_in_H2
+        self.KPI['LCOH'] = num/den
 
         self.KPI["wasted_power"] = 1 - sum(self.data["supply_power"])/sum(self.data["excess_power"])
-        self.KPI["benefit"] = self.param["H2_price"]*self.KPI['H2_sold']
+        q = 1-eps
+        decrease = (1-q**years)/(1-q)
+        self.KPI["benefit"] = self.param["H2_price"]*self.KPI['H2_sold']*decrease
         self.KPI["wasted_hydrogen"] = sum(self.res["wasted"])/sum(self.res['H2_compressed'])
         self.KPI["%time_storage_full"] = sum([self.res['stored'][t] == self.var["storage_capacity"] for t in range(self.duration)])/self.duration
-  
+
+    def get_KPI_2(self):
+        """
+        Retourne tous les CAPEX et OPEX détaillés pour les camemberts.
+
+        Returns
+        -------
+        dict
+            Dictionnaire contenant tous les CAPEX et OPEX détaillés.
+        """
+        years = 30
+        kg_to_m3 = 1*self.param["correlation_to_reality"]*self.gas_model["R"]*(self.gas_model["T_op"]+273.15)/(self.gas_model["M"]*self.gas_model["P_op"]*10**5)
+
+        # Calcul du H2 vendu et produit
+        self.KPI['H2'] = sum(self.res["mass_H2"])
+        total_sold_decompressed = sum(self.res["sold"])/(self.gas_model["P_op"]/self.gas_model["P_out"])**(1/self.gas_model["n"])
+        self.KPI["H2_sold"] = (self.gas_model["M"]*self.gas_model["P_op"]*10**5)*total_sold_decompressed/(self.gas_model["R"]*(self.gas_model["T_op"]+273.15))
+
+        # CAPEX détaillés
+        storage_in_kg = ((self.gas_model['P_out']*1e5)*self.var['storage_capacity']*self.gas_model['M'])/(self.gas_model['R']*(self.gas_model['T_op']+273.15))
+        CAPEX_PEM = self.economics['install_fee']*self.var['electrolyzer_capacity']
+        CAPEX_storage = 490*storage_in_kg
+        CAPEX_compressor = 93296  # Partie fixe du CAPEX_selling
+        CAPEX_tube_trailer = self.var["number_of_trucks"]*610000
+        CAPEX_selling = CAPEX_compressor + CAPEX_tube_trailer
+        CAPEX_total = CAPEX_PEM + CAPEX_storage + CAPEX_selling
+
+        # Coûts de remplacement
+        replacement_PEM = (years//7.6)*630*self.var['electrolyzer_capacity']
+        replacement_storage = (years//25)*470*self.var['storage_capacity']/kg_to_m3
+
+        # OPEX détaillés
+        OPEX_PEM = self.economics['OPEX_PEM']*self.var['electrolyzer_capacity']
+        OPEX_water = self.economics['water_price']*self.economics["water_consumption"]*self.KPI['H2']
+        OPEX_compressor = 4665
+        OPEX_storage = 9.385398411955556*self.var['storage_capacity']*kg_to_m3
+        OPEX_tube_trailer = 30500*self.var['number_of_trucks']
+        OPEX_total = OPEX_PEM + OPEX_water + OPEX_compressor + OPEX_storage + OPEX_tube_trailer
+
+        # Calcul du LCOH
+        replacement = replacement_PEM + replacement_storage
+        WACC = 5/100
+        eps = 0.3/100
+        num = CAPEX_total + replacement + sum([OPEX_total/(1+WACC)**n for n in range(1, years+1)])
+        energy_in_H2 = self.KPI['H2_sold']*self.param['LHV_kg']
+        den = energy_in_H2*sum([(1-eps)**(n-1)/(1+WACC)**n for n in range(1, years+1)])
+        LCOH = num/den
+
+        # Autres KPIs
+        wasted_power = 1 - sum(self.data["supply_power"])/sum(self.data["excess_power"])
+        wasted_hydrogen = sum(self.res["wasted"])/sum(self.res['H2_compressed'])
+
+        return {
+            # CAPEX
+            'CAPEX_PEM': CAPEX_PEM,
+            'CAPEX_storage': CAPEX_storage,
+            'CAPEX_compressor': CAPEX_compressor,
+            'CAPEX_tube_trailer': CAPEX_tube_trailer,
+            'CAPEX_selling': CAPEX_selling,
+            'CAPEX_total': CAPEX_total,
+            'replacement_PEM': replacement_PEM,
+            'replacement_storage': replacement_storage,
+
+            # OPEX
+            'OPEX_PEM': OPEX_PEM,
+            'OPEX_water': OPEX_water,
+            'OPEX_compressor': OPEX_compressor,
+            'OPEX_storage': OPEX_storage,
+            'OPEX_tube_trailer': OPEX_tube_trailer,
+            'OPEX_total': OPEX_total,
+
+            # KPIs
+            'LCOH': LCOH,
+            'H2': self.KPI['H2'],
+            'H2_sold': self.KPI['H2_sold'],
+            'wasted_power': wasted_power,
+            'wasted_hydrogen': wasted_hydrogen
+        }
+
     def objective(self, C, S, N, T):
         """
         To compute the objective function : LCOH
@@ -355,7 +465,7 @@ class H2plant():
     
     def objective2(self, C, S, N, T):
         """
-        To compute the objective function : LCOH
+        To compute the second objective function.
 
         Parameters
         ----------
@@ -551,62 +661,25 @@ class H2plant():
             "wasted_hydrogen" : 0, #%of the total hydrogen that couldn't be stored (when storage full) [%]
             "%time_storage_full" : 0 #% of time when the storage is full [%]
             }
-        
-
-def pareto(v_min, v_max, nb):
-    plant = empty_plant()
-    
-    # C = 20000
-    # plant.set_electrolyzer_capacity(C)
-    
-    S = 1e3
-    plant.set_storage_capacity(S)
-    
-    N = 200
-    plant.set_number_of_trucks(N)
-    
-    variables = np.arange(v_min, v_max, nb)
-    LCOHs = []
-    wasted_H2s = []
-    wasted_powers = []
-    
-    for val in variables:
-        plant.set_electrolyzer_capacity(val)
-        
-        plant.electrolyzer_production()
-        plant.hydrogen_management()
-        plant.get_KPI()
-        
-        LCOHs.append(plant.KPI['LCOH'])
-        wasted_H2s.append(plant.KPI['wasted_hydrogen'])
-        wasted_powers.append(plant.KPI['wasted_power'])
-    
-    # Plots
-    
-    fig, ax = plt.subplots(1, 2)
-    
-    ax[0].plot(variables, LCOHs)
-    ax[0].set_title('LCOH in relation to the electrolyser capacity')
-    ax[0].set_xlabel('Capacity [kW]')
-    ax[0].set_ylabel('LCOH [EUR/kWh]')
-    
-    ax[1].plot(wasted_H2s, wasted_powers)       
 
 
 
-#STUDY PART 1
+# --------------- To initialize
 
 def empty_plant(nb=104):
     """
     To create a plant with the wind and power data initialized with excel.
 
+    Parameters
+    ----------
+            
+    nb : int
+        The number of wind turbines.
+
     Returns
     -------
     plant : TYPE
         DESCRIPTION.
-        
-    nb : int
-        The number of wind turbines.
 
     """
     plant = H2plant()
@@ -614,9 +687,11 @@ def empty_plant(nb=104):
     plant.power_manager()
     return plant
 
+
 def define_plant(C, S, N, T=1, nb=104):
     """
-    To define a plant with the variables.
+    To get the KPIs from a plant defined with the 
+    specific variables.
 
     Parameters
     ----------
@@ -633,8 +708,8 @@ def define_plant(C, S, N, T=1, nb=104):
 
     Returns
     -------
-    plant : TYPE
-        DESCRIPTION.
+    plant : H2plant
+        Plant with updated KPIs.
 
     """
     plant = H2plant()
@@ -649,84 +724,11 @@ def define_plant(C, S, N, T=1, nb=104):
     plant.electrolyzer_production()
     plant.hydrogen_management()
     plant.get_KPI()
+    
     return plant 
 
-def optimisation(plant, mini_electrolyzer, maxi_electrolyzer, incr, min_storage, max_storage, want_progression=1):
-    
-    total_H2_list = []
-    total_LCOH = []
-    
-    capacities = range(mini_electrolyzer, maxi_electrolyzer, incr)
-    cpt = 0
-    
-    storages = range(min_storage, max_storage, 5)
-    
-    fig = plt.figure() 
-    ax = fig.add_subplot(111, projection='3d')
-    "To prepare the 3D graph"
-    
-    for capacity in capacities:
-        
-        total_H2_wasted_list = []
-        total_LCOH = []
-        total_wasted_power = []
-        "To reset our variables"
-        plant.set_electrolyzer_capacity(capacity)
-        
-        for storage in storages: 
-            plant.set_storage_capacity(storage)
-            plant.electrolyzer_production()
-            plant.hydrogen_management()
-            plant.get_KPI()
-            total_H2_wasted_list.append(plant.KPI["wasted_hydrogen"])
-            total_LCOH.append(plant.KPI['LCOH'])
-        
-        
-        total_H2_wasted_array = np.array(total_H2_wasted_list)
-        total_LCOH_array = np.array(total_LCOH)
-        total_wasted_power_array = np.array(total_wasted_power)
-        'Convertir les listes en tableaux numpy'
-        
-        X = total_H2_wasted_array.reshape(-1, 1)
-        Y = total_LCOH_array.reshape(-1, 1)
-        Z = total_wasted_power_array.reshape(-1, 1)
-        'Remodeler les tableaux en tableaux bidimensionnels'
-        
-        X, Y = np.meshgrid(X, Y)
-        ax.plot_surface(Z, Y, X, cmap='viridis')
-        'cmap for the graph color'
-        
-        if want_progression == 1:
-            cpt += 1
-            if cpt%10 == 0:
-                print(100*cpt/len(capacities), "% completed.")
-            
-            
-    # plt.xlabel("LCOH [€/kWh]")
-    # plt.ylabel("Total Hydrogen wasted [kg]")
-    ax.set_xlabel('Total Hydrogen wasted [kg]')
-    ax.set_ylabel('LCOH [€/kWh]')
-    ax.set_zlabel('Total Power wasted [kW]')
-    fig.show()    
-        # plt.figure()
-        # plt.xlabel("Capacity [kW]")
-        # plt.ylabel("LCOH [€/kWh]")
-        # plt.plot(capacities, total_LCOH)
-        
-        # plt.figure()
-        # plt.xlabel("LCOH [€/kWh]")
-        # plt.ylabel("Total hydrogen produced [kg]")
-        # plt.plot(total_LCOH, total_H2_list,'+')
-    
-    # # Selection rule for the best capacity
-    # for i in range(len(total_H2_list)):
-    #     if total_H2_list[i] == max(total_H2_list):
-    #         design_capacity = capacities[i]
-    #         break
-    # return design_capacity
+# --------------- Wind/Nuclear plant simulation
 
-# For sensitivity analysis
-        
 def wind_power_prod(wind):
     """
     To get the expected yield power from a wind turbine with a specific power curve.
@@ -752,6 +754,7 @@ def wind_power_prod(wind):
     return power
 
 def simulate_wind_distribution(L, k, duration = 8760):
+    # TO BE VERIFIED
     """
     Simulate a wind distribution, based on the Weibull law.
 
@@ -777,7 +780,6 @@ def simulate_wind_distribution(L, k, duration = 8760):
     return wind
 
 def simulate_wind_power_plant(L, k, duration = 8760):
-    #TO VARY
     """
     Simulate a wind power plant.
 
@@ -806,6 +808,8 @@ def simulate_nuclear_power_plant(capacity, duration = 8760):
     # TO BE COMPLETED
     CF = 0.92
     
+# --------------- For plots
+
 def show_production(plant):
     """
     To show the primary, excess and supplied power, of a plant.
@@ -837,7 +841,7 @@ def show_production(plant):
     #NP + WP, grid limit
     temps = range(plant.duration)
     NP_WP = [WP[t] + NP[t] for t in temps]
-    axis[2].stackplot(temps, [WP, NP], label="Nuclear power + Wind power")
+    axis[2].stackplot(temps, [WP, NP], labels= ["Wind power", "Nuclear power"])
     axis[2].plot(temps, [plant.param['grid_limit']]*plant.duration, label=F"Grid limitation : {plant.param['grid_limit']} kW")
     
     axis[2].set_title("Wind power + Nuclear power [kW]")
@@ -877,7 +881,8 @@ def show_production(plant):
 
 def show_management(plant):
     """
-    To show the hydrogen flow in the system.
+    To show the hydrogen flow in the system using Plotly for Streamlit.
+    Returns two separate figures to display with legend between them.
 
     Parameters
     ----------
@@ -886,40 +891,100 @@ def show_management(plant):
 
     Returns
     -------
-    None.
+    tuple : (fig1, fig2)
+        Two Plotly figures for hydrogen management.
 
     """
+    import plotly.graph_objects as go
+
     t = np.arange(plant.duration)
-    figure, axis = plt.subplots(2, 1)
-    
-    axis[0].plot(t, plant.res['H2_compressed'], label="Hydrogen produced")
-    axis[0].plot(t, plant.res['stored'], label="Hydrogen stored")
-    axis[0].plot([0, plant.duration-1], [plant.var['storage_capacity']]*2, 'r', label="Storage capacity")
-    axis[0].plot([0, plant.duration-1], [plant.var['storage_capacity']*plant.var['threshold']]*2, 'r--', label="Threshold")
-    
-    plt.setp(axis[0], xlabel = "Time [hour]")
-    plt.setp(axis[0], ylabel = "Volume of hydrogen produced/stored [m3]")
-    
-    axis[0].set_title(f'''Hydogen capacity : {plant.var["electrolyzer_capacity"]} kW /
-              Storage capacity : {plant.var["storage_capacity"]} m3 /
-              Number of trucks : {plant.var['number_of_trucks']}.\n\n
-              Hydrogen produced and stored throughout the year.''')
-    
-    axis[0].legend()
-    
+
+    # Figure 1: Production et stockage
+    fig1 = go.Figure()
+
+    fig1.add_trace(go.Scatter(
+        x=t,
+        y=plant.res['H2_compressed'],
+        mode='lines',
+        name='Hydrogen produced',
+        line=dict(color='#1f77b4', width=1.5),
+        legendgroup='group1'
+    ))
+
+    fig1.add_trace(go.Scatter(
+        x=t,
+        y=plant.res['stored'],
+        mode='lines',
+        name='Hydrogen stored',
+        line=dict(color='#ff7f0e', width=1.5),
+        legendgroup='group1'
+    ))
+
+    fig1.add_trace(go.Scatter(
+        x=[0, plant.duration-1],
+        y=[plant.var['storage_capacity'], plant.var['storage_capacity']],
+        mode='lines',
+        name='Storage capacity',
+        line=dict(color='red', width=2, dash='dash'),
+        legendgroup='group1'
+    ))
+
+    fig1.update_layout(
+        title=dict(
+            text='Hydrogen produced and stored throughout the year',
+            font=dict(size=16, family="Arial")
+        ),
+        xaxis=dict(title='Time [hour]'),
+        yaxis=dict(title='Volume of hydrogen produced/stored [m³]'),
+        height=400,
+        showlegend=False,
+        template='plotly_white',
+        font=dict(family="Arial, sans-serif", size=12),
+        margin=dict(l=60, r=20, t=60, b=60)
+    )
+
+    # Figure 2: Cumulatif
     tmp = plant.res['H2_compressed']
     tmp2 = plant.res["wasted"]
-    axis[1].plot(t, [sum(tmp[:T]) for T in t], label='Amount of hydrogen produced')
-    axis[1].plot(t, [sum(tmp2[:T]) for T in t], label='Amount of hydrogen wasted')
-    
-    plt.setp(axis[1], xlabel = 'Time [hour]')
-    plt.setp(axis[0], ylabel = "Total volume hydrogen produced/wasted[m3]")
-    
-    axis[1].set_title(f'''Hydrogen produced and stored throughout the year. \n
-                      Share of hydrogen wasted : {int(100*sum(tmp2)/sum(tmp))}%''')
-    axis[1].legend()
-    
-    figure.show()
+    cumulative_produced = [sum(tmp[:T+1]) for T in range(len(t))]
+    cumulative_wasted = [sum(tmp2[:T+1]) for T in range(len(t))]
+
+    fig2 = go.Figure()
+
+    fig2.add_trace(go.Scatter(
+        x=t,
+        y=cumulative_produced,
+        mode='lines',
+        name='Amount of hydrogen produced',
+        line=dict(color='#2ca02c', width=1.5),
+        legendgroup='group2'
+    ))
+
+    total_wasted_pct = int(100*sum(tmp2)/sum(tmp))
+    fig2.add_trace(go.Scatter(
+        x=t,
+        y=cumulative_wasted,
+        mode='lines',
+        name=f'Amount of hydrogen wasted (Total wasted: {total_wasted_pct}%)',
+        line=dict(color='#d62728', width=1.5),
+        legendgroup='group2'
+    ))
+
+    fig2.update_layout(
+        title=dict(
+            text='Cumulative hydrogen produced and wasted throughout the year',
+            font=dict(size=16, family="Arial")
+        ),
+        xaxis=dict(title='Time [hour]'),
+        yaxis=dict(title='Total volume hydrogen produced/wasted [m³]'),
+        height=400,
+        showlegend=False,
+        template='plotly_white',
+        font=dict(family="Arial, sans-serif", size=12),
+        margin=dict(l=60, r=20, t=60, b=60)
+    )
+
+    return fig1, fig2
      
 def close():
     """
@@ -932,7 +997,7 @@ def close():
     """
     plt.close("all")
 
-# -------------------- GENETIC ALGORITHM -------------------------
+# --------------- GENETIC ALGORTIHM
 
 def create_pop(len_population, C_min, C_max, S_min, S_max, N_min, N_max):
     """
@@ -1426,6 +1491,19 @@ def crazy_mutation(elem, len_pop, probability, multiplier ,C_min, C_max, S_min, 
     return new_gene
 
 def crazy_mutation_2(plant, elem, len_pop, probability, multiplier ,C_min, C_max, S_min, S_max, N_min, N_max, C_rate, S_rate, N_rate, no_print):
+    """
+    Function crazy mutation 2. Used to force a whole population to mute, to enhance diversity.
+
+    Parameters
+    ----------
+    The same arg
+
+    Returns
+    -------
+    new_gene : TYPE
+        DESCRIPTION.
+
+    """
     el = elem.copy()
     new_gene = [el]
     nb_mut = int(len_pop/2)
@@ -1435,12 +1513,25 @@ def crazy_mutation_2(plant, elem, len_pop, probability, multiplier ,C_min, C_max
         mut = mutation_1(el, probability, multiplier ,C_min, C_max, S_min, S_max, N_min, N_max, C_rate, S_rate, N_rate)
         new_gene.append(mut)
     
-    i = initialization(plant, nb_init, C_min, C_max, S_min, S_max, S_min, S_max, no_print)
+    i = initialization(plant, nb_init, C_min, C_max, S_min, S_max, N_min, N_max, no_print)
     new_gene += i
     
     return new_gene
 
 def crazy_mutation_3(plant, elem, len_pop,C_min, C_max, S_min, S_max, N_min, N_max):
+    """
+    Function crazy mutation 3. Used to force a whole population to mute, to enhance diversity.
+
+    Parameters
+    ----------
+    The same arg
+
+    Returns
+    -------
+    new_gene : TYPE
+        DESCRIPTION.
+
+    """
     new_gene = [elem]
     for i in range(len_pop-1):
         new_gene.append(mutation_3(elem, 10, C_min, C_max, S_min, S_max, N_min, N_max))
@@ -1476,28 +1567,22 @@ def algo(plant, len_pop, n_iter, C_min, C_max, S_min, S_max, N_min, N_max, print
     LCOHs : list
         The list of LCOHs of all the members.
     new_gene : list
-        Useless, but do not delete.
+        The list of all the members of the last iteration.
 
     """
-    # When we start crazy mutation
-    threshold_same_LCOH = 2
+    # When do we start crazy mutation
+    threshold_same_LCOH = 2 
     rank_digits_that_changes = 4
     precision = 10**(-(rank_digits_that_changes-1))
-    
-    # Range for the mutation
-    C_rate = 0.2
-    S_rate = 0.2
-    N_rate = 0.1
-    
-    # initial_pop = create_pop(len_pop)
+
+    # Initialisation
     initial_pop = initialization(plant, len_pop, C_min, C_max, S_min, S_max, N_min, N_max, printed)
     new_gene = initial_pop    
-    
     LCOHs = []
     
     # Definition of a new generation
+    
     from_best = 1 # The number of best from the previous generation that stays in the new generation
-   
     mutation_of_from_best = 2 # The number of mutation of the from_best 
     child_per_best = 2 # The number of children from the best
     from_init = 10 # From a new initialization
@@ -1507,8 +1592,9 @@ def algo(plant, len_pop, n_iter, C_min, C_max, S_min, S_max, N_min, N_max, print
     p_crossover = 0.95
     p_mutation = 0.75
     
-    # Compteur mutation
+    # Compteur for crazy mutation
     cpt_mut = 0
+    
     for k in range(n_iter):
         # Sort + selection + improver step
         sort_pop, sort_pop_LCOH, best_LCOH = sort_selection(plant, new_gene, 4, C_min, C_max, S_min, S_max, N_min, N_max)
@@ -1520,15 +1606,18 @@ def algo(plant, len_pop, n_iter, C_min, C_max, S_min, S_max, N_min, N_max, print
         
         # If there are converge issues, we do a crazy mutation
         last_LCOH = LCOHs[-threshold_same_LCOH:]
-
+        
+        # We count how many times the LCOH has not varied more than a specific value (precision)
         nb_time_same_LCOH = sum([LCOH - best_LCOH < precision for LCOH in last_LCOH])
-
+        
+        # If the LCOH hasn't varied much for a long period of time, we do crazy mutation
         if k >= threshold_same_LCOH and nb_time_same_LCOH == threshold_same_LCOH:
                 cpt_mut += 1
                 new_gene = crazy_mutation_3(plant, sort_pop[0], len_pop, C_min, C_max, S_min, S_max, N_min, N_max)
                 # new_gene = crazy_mutation(sort_pop[0], len_pop, 100, 10 ,C_min, C_max, S_min, S_max, N_min, N_max, C_rate, S_rate, N_rate)
                 # new_gene = crazy_mutation_2(plant, sort_pop[0], len_pop, 100, 15 ,C_min, C_max, S_min, S_max, N_min, N_max, C_rate, S_rate, N_rate, 0)
                 if cpt_mut == 20:
+                    # Too many crazy mutations, we can't find any better solution
                     print("Fin prématuré")
                     return best_config, best_LCOH, LCOHs, new_gene
                 if printed != 0:
@@ -1537,19 +1626,11 @@ def algo(plant, len_pop, n_iter, C_min, C_max, S_min, S_max, N_min, N_max, print
         
         # Else, we continue the classic generation creation
         else:            
-            cpt_mut = 1
-            # ---- ON N'UTILISE PLUS LES LISTES POUR GAGNER DU TEMPS
-            # We add the best ONE
-            #for i in range(from_best):
+            cpt_mut = 0
+            # We add the best ONE in the new_gene
             new_gene.append(sort_pop[0])
             
-            # print("We add the best ones ")
-            # print(new_gene)
-            
-            
             # We add mutations from THE best
-            
-            #for i in range(from_best):
             p = new_gene[0]
             for j in range(mutation_of_from_best):
                 muted = mutation_3(p, 10 ,C_min, C_max, S_min, S_max, N_min, N_max)
@@ -1591,7 +1672,7 @@ def algo(plant, len_pop, n_iter, C_min, C_max, S_min, S_max, N_min, N_max, print
                 child = crossover_4(p1, p2, 10)
                 new_gene.append(child)
             
-            # We add random guys
+            # We add random members
             pop = initialization(plant, from_init, C_min, C_max, S_min, S_max, S_min, S_max, 0)
             new_gene += pop   
             
@@ -1615,7 +1696,6 @@ def algo(plant, len_pop, n_iter, C_min, C_max, S_min, S_max, N_min, N_max, print
                 # print("We add the others")
                 # print(new_gene)
                 
-            
             if printed != 0:
                 print(f"{k+1}/{n_iter} iterations. Best LCOH : {best_LCOH}, best config {best_config}.")
             
@@ -1625,11 +1705,235 @@ def algo(plant, len_pop, n_iter, C_min, C_max, S_min, S_max, N_min, N_max, print
     LCOHs.append(best_LCOH)
         
     best_config = sort_pop[0]
-    
+
     return best_config, best_LCOH, LCOHs, new_gene
- 
+
+def algo_with_tracking(plant, len_pop, n_iter, C_min, C_max, S_min, S_max, N_min, N_max, track_population=False, printed=0):
+    """
+    The genetic algorithm with population tracking for 3D visualization.
+
+    Parameters
+    ----------
+    plant : H2 plant.
+        A H2 plant. Suggestion : use the same H2 plant as the one used for sort_selection and initialization.
+    len_pop : int.
+        The length of the population (suggestion : around 40).
+    n_iter : int.
+        The number of iterations before providing the results (suggestion : around 50).
+
+    C_min, C_max, S_min, S_max, N_min, N_max are all int and represent the minimum/maximum value
+    that can take the electrolyzer capacity (C), the storage capacity (S), and
+    the number of trucks (N) of each member of the population.
+    track_population : bool. Default value = False
+        If True, captures all population data at each iteration for 3D visualization.
+    printed : int. Default value = 0
+        If printed = 0 : it won't print the progress of the function (recommended while doing a multiprocess).
+        Otherwise : it will.
+
+    Returns
+    -------
+    best_config : list.
+        The best member.
+    best_LCOH : float
+        The LCOH associated with the best member.
+    LCOHs : list
+        The list of LCOHs of all the members.
+    new_gene : list
+        The list of all the members of the last iteration.
+    all_iterations : list (only if track_population=True)
+        List of dictionaries containing population data for each iteration.
+
+    """
+    # When do we start crazy mutation
+    threshold_same_LCOH = 2
+    rank_digits_that_changes = 4
+    precision = 10**(-(rank_digits_that_changes-1))
+
+    # Initialisation
+    initial_pop = initialization(plant, len_pop, C_min, C_max, S_min, S_max, N_min, N_max, printed)
+    new_gene = initial_pop
+    LCOHs = []
+
+    # For tracking population evolution
+    all_iterations = [] if track_population else None
+
+    # Definition of a new generation
+
+    from_best = 1 # The number of best from the previous generation that stays in the new generation
+    mutation_of_from_best = 2 # The number of mutation of the from_best
+    child_per_best = 2 # The number of children from the best
+    from_init = 10 # From a new initialization
+    others = len_pop - from_best*(1 + mutation_of_from_best + child_per_best) - from_init # The others : childs from the remaining
+
+    # Probability defintions
+    p_crossover = 0.95
+    p_mutation = 0.75
+
+    # Compteur for crazy mutation
+    cpt_mut = 0
+
+    for k in range(n_iter):
+        # Sort + selection + improver step
+        sort_pop, sort_pop_LCOH, best_LCOH = sort_selection(plant, new_gene, 4, C_min, C_max, S_min, S_max, N_min, N_max)
+        best_config = sort_pop[0]
+        LCOHs.append(best_LCOH)
+
+        # Capture population data for 3D visualization
+        if track_population:
+            all_iterations.append({
+                'iteration': k,
+                'population': [member for member in sort_pop],
+                'lcoh_values': [lcoh for _, lcoh in sort_pop_LCOH],
+                'best_member': best_config.copy(),
+                'best_lcoh': best_LCOH
+            })
+
+        best_pop_LCOH = sort_pop_LCOH[:from_best]
+        new_gene = []
+
+        # If there are converge issues, we do a crazy mutation
+        last_LCOH = LCOHs[-threshold_same_LCOH:]
+
+        # We count how many times the LCOH has not varied more than a specific value (precision)
+        nb_time_same_LCOH = sum([LCOH - best_LCOH < precision for LCOH in last_LCOH])
+
+        # If the LCOH hasn't varied much for a long period of time, we do crazy mutation
+        if k >= threshold_same_LCOH and nb_time_same_LCOH == threshold_same_LCOH:
+                cpt_mut += 1
+                new_gene = crazy_mutation_3(plant, sort_pop[0], len_pop, C_min, C_max, S_min, S_max, N_min, N_max)
+                # new_gene = crazy_mutation(sort_pop[0], len_pop, 100, 10 ,C_min, C_max, S_min, S_max, N_min, N_max, C_rate, S_rate, N_rate)
+                # new_gene = crazy_mutation_2(plant, sort_pop[0], len_pop, 100, 15 ,C_min, C_max, S_min, S_max, N_min, N_max, C_rate, S_rate, N_rate, 0)
+                if cpt_mut == 20:
+                    # Too many crazy mutations, we can't find any better solution
+                    print("Fin prématuré")
+                    if track_population:
+                        return best_config, best_LCOH, LCOHs, new_gene, all_iterations
+                    else:
+                        return best_config, best_LCOH, LCOHs, new_gene
+                if printed != 0:
+                    print(f"{k+1}/{n_iter} iterations. CRAZY MUTATION Best LCOH : {best_LCOH}, best config {best_config}.")
+
+
+        # Else, we continue the classic generation creation
+        else:
+            cpt_mut = 0
+            # We add the best ONE in the new_gene
+            new_gene.append(sort_pop[0])
+
+            # We add mutations from THE best
+            p = new_gene[0]
+            for j in range(mutation_of_from_best):
+                muted = mutation_3(p, 10 ,C_min, C_max, S_min, S_max, N_min, N_max)
+                # muted = mutation_2(p, 2, 10, C_min, C_max, S_min, S_max, N_min, N_max, 0.05, 0.05, 0.05)
+                new_gene.append(muted)
+
+            # # We add the best ones
+            # for i in range(from_best):
+            #     new_gene.append(sort_pop[i])
+
+            # # print("We add the best ones ")
+            # # print(new_gene)
+            #
+
+            # # We add mutations from best
+            # # tmp = new_gene.copy()
+            # for i in range(from_best):
+            #     # p = tmp[i]
+            #     p = new_gene[i]
+            #     for j in range(mutation_of_from_best):
+            #         muted = mutation_3(p, 10 ,C_min, C_max, S_min, S_max, N_min, N_max)
+            #         # muted = mutation_2(p, 2, 10, C_min, C_max, S_min, S_max, N_min, N_max, 0.05, 0.05, 0.05)
+            #         new_gene.append(muted)
+
+            # print("We add mutations from best")
+            # print(new_gene)
+
+
+            # We add children from best
+            # tmp = new_gene.copy()
+            # for i in range(from_best):
+            p1 = best_pop_LCOH[0]
+            for j in range(child_per_best):
+                p2 = parent_selection_alea(sort_pop_LCOH)
+
+                # child = crossover_1(p1, p2, 10)
+                # child = crossover_2(p1, p2, 0.7, 10)
+                # child = crossover_3(p1, p2, 10)
+                child = crossover_4(p1, p2, 10)
+                new_gene.append(child)
+
+            # We add random members
+            pop = initialization(plant, from_init, C_min, C_max, S_min, S_max, S_min, S_max, 0)
+            new_gene += pop
+
+            # We add the others
+            for i in range(others):
+                p1 = parent_selection_alea(sort_pop_LCOH)
+                p2 = parent_selection_alea(sort_pop_LCOH)
+
+                # Crossover
+                # child = crossover_1(p1, p2, p_crossover)
+                # child = crossover_2(p1, p2, 0.7, p_crossover)
+                # child = crossover_3(p1, p2, p_crossover)
+                child = crossover_4(p1, p2, p_crossover)
+
+                # Mutation
+                # mut = mutation_2(child, p_mutation, 10, C_min, C_max, S_min, S_max, N_min, N_max, C_rate, S_rate, N_rate)
+                mut = mutation_3(child, p_mutation ,C_min, C_max, S_min, S_max, N_min, N_max)
+                # New child
+                new_gene.append(mut)
+
+                # print("We add the others")
+                # print(new_gene)
+
+            if printed != 0:
+                print(f"{k+1}/{n_iter} iterations. Best LCOH : {best_LCOH}, best config {best_config}.")
+
+            # print(f"{i+1}/{n_iter} iterations.")
+    # Sort step
+    sort_pop, sort_pop_LCOH, best_LCOH = sort_selection(plant, new_gene, 1, C_min, C_max, S_min, S_max, N_min, N_max)
+    LCOHs.append(best_LCOH)
+
+    # Capture final iteration
+    if track_population:
+        all_iterations.append({
+            'iteration': n_iter,
+            'population': [member for member in sort_pop],
+            'lcoh_values': [lcoh for _, lcoh in sort_pop_LCOH],
+            'best_member': sort_pop[0].copy(),
+            'best_lcoh': best_LCOH
+        })
+
+    best_config = sort_pop[0]
+
+    if track_population:
+        return best_config, best_LCOH, LCOHs, new_gene, all_iterations
+    else:
+        return best_config, best_LCOH, LCOHs, new_gene
+
 def optimization(plant, n_best_design, n_iter, len_pop, C_min, C_max, S_min, S_max, N_min, N_max, printed=1):
+    """
     
+
+    Parameters
+    ----------
+  
+    n_best_design : int.
+        Number of runs of 'algo'.
+    The other arguments are the same as the one defined in the algo function.
+
+    Returns
+    -------
+    [Cs, Ss, Ns, LCOHs] : list
+        A list containing a list of the best designs, and their associated LCOH
+        Cs = [optimised C of the run 1, optimised C of the run 2, ...]
+        Ss = [optimised S of the run 1, optimised S of the run 2, ...]
+        Ns = [optimised N of the run 1, optimised N of the run 2, ...]
+        LCOHs = [LCOH of the optimised design from the run 1, LCOH of the optimised design from the run 2, ...]
+    [Cs[min_i], Ss[min_i], Ns[min_i], min(LCOHs)] : list
+        The electrolyzer capacity, storage capacity, number of trucks of the best design among all, and its LCOH associated
+
+    """
     Cs, Ns, Ss = [], [], []
     LCOHs = []
     
@@ -1646,21 +1950,6 @@ def optimization(plant, n_best_design, n_iter, len_pop, C_min, C_max, S_min, S_m
         if printed != 0:
             print(f"Algo {i+1}/{n_best_design} completed")
     
-    # fig, axis = plt.subplots(2, 2)
-    
-    # axis[0, 0].boxplot(Cs)
-    # axis[0, 0].set_title(f"Best C : {np.mean(Cs)}")
-    
-    # axis[0, 1].boxplot(Ss)
-    # axis[0, 1].set_title(f"Best S : {np.mean(Ss)}")
-    
-    # axis[1, 0].boxplot(Ns)
-    # axis[1, 0].set_title(f"Best N : {np.mean(Ns)}")
-    
-    # axis[1, 1].boxplot(LCOHs)
-    # axis[1, 1].set_title(f"Best LCOH : {np.mean(LCOHs)}")
-    
-    # fig.show()
     min_i = 0
     for i in range(len(LCOHs)):
         if LCOHs[i] == min(LCOHs):
@@ -1669,92 +1958,117 @@ def optimization(plant, n_best_design, n_iter, len_pop, C_min, C_max, S_min, S_m
     
     return [Cs, Ss, Ns, LCOHs], [Cs[min_i], Ss[min_i], Ns[min_i], min(LCOHs)]
 
-def sensitivity_analysis(plant, param_analysis, mini, maxi):
+def sensitivity(val_min, val_max, nb, what):    
     """
-    To conduct a sensitivity analysis in relation to a parameter. 100 different
-    values will be taken by the parameter. The function will plot the influence
-    of this analysis on all the KPIs.
-    Return the list of lists of KPIs.
+    To create a "sensitivity analysis" on the different variables of the model.
+    It's not a proper sensitivity analysis, because it's not applied on
+    a parameter of the model.
 
     Parameters
     ----------
-    plant : H2plant
-        Hydrogen plant with data (get_data_from_excel or from_python).
-    param_analysis : str
-        The parameter in relation to which the analysis will be conducted.
-    mini : int
-        The minimum value taken by the parameter.
-    maxi : TYPE
-        The maximum value taken by the parameter.
-
+    val_min : int.
+        Minimum value for the analysis.
+    val_max : int
+        Maximum value for the analysis.
+    nb : int
+        Number of points used for the analysis.
+    what : str
+        If what = 'C' : analysis done on the electrolyzer capacity.
+        If what = 'S' : analysis done on the storage capacity.
+        If what = 'N' : analysis done on the number of trucks.
+        
     Returns
     -------
-    KPIs : list
-        List of lists of KPIs.
-        KPIs = [[LCOH_1, H2_1, ..., %time_full_1"], [LCOH_2, H2_2, ..., %time_full_2"]]
+    None.
 
     """
-    name_KPIs = ["LCOH", "H2", "wasted_power", "benefit", "wasted_hydrogen", "%time_storage_full"]
-    KPIs = [[], [], [], [], [], []]
+    r = np.linspace(val_min, val_max, nb, dtype=int)
 
-    params = np.linspace(mini, maxi, 10)
-    compteur = 1
-    for param in params:
-        plant.param[param_analysis] = param
-        plant.power_manager()
+    LCOHs = []
+    wasted_H2s = []
+    wasted_Ps = []
+    
+    cpt = 0
+    
+    for val in r:
+        
+        plant = empty_plant()   
+        plant.set_electrolyzer_capacity(49161)
+        plant.set_storage_capacity(326)
+        plant.set_number_of_trucks(11)
+        
+        if what == 'C':
+            plant.set_electrolyzer_capacity(val)
+        elif what == 'S':
+            plant.set_storage_capacity(val)
+        elif what == 'N':
+            plant.set_number_of_trucks(val)
+        cpt += 1
+        print(f"{cpt}/{len(r)} iterations.")
+        
         plant.electrolyzer_production()
         plant.hydrogen_management()
         plant.get_KPI()
-        for i in range(6):
-            KPIs[i].append(plant.KPI[name_KPIs[i]])
-       
-        if compteur%20 == 0:
-            print(compteur, "% complété(s).")
-        compteur += 1
-
-    figure, axis = plt.subplots(3, 2)
-    for i in range(6):
-        KPIi = KPIs[i]
-        axis[i//2, i%2].plot(params, KPIi)
-    
-    plt.show()
-    return KPIs
-
-def optimization_sensitivity(plant, n_best_design, n_iter, len_pop, C_min, C_max, S_min, S_max, N_min, N_max):
-    
-    Cs, Ns, Ss = [], [], []
-    LCOHs = []
-    
-    for i in range(n_best_design):
-        best_config, best_LCOH, useless, useless2 = algo(plant, len_pop, n_iter, C_min, C_max, S_min, S_max, N_min, N_max)
-        best_C, best_S, best_N = best_config
         
-        Cs.append(best_C)
-        Ss.append(best_S)
-        Ns.append(best_N)
-        LCOHs.append(best_LCOH)
-        print(f"Algo {i+1}/{n_best_design} completed")
+        LCOHs.append(plant.KPI['LCOH'])
+        wasted_H2s.append(plant.KPI['wasted_hydrogen']*100)
+        wasted_Ps.append(plant.KPI['wasted_power']*100)
+        
+    fig, ax = plt.subplots()
     
-    # fig, axis = plt.subplots(2, 2)
+    ax.plot(r, LCOHs)
     
-    # axis[0, 0].boxplot(Cs)
-    # axis[0, 0].set_title(f"Best C : {np.mean(Cs)}")
+    ax.set_ylabel("LCOH [EUR/kWh]")
+    if what == 'C':
+        ax.set_xlabel("Electrolyzer capacity [kW]")
+        t = "electrolyzer capacity"
+    elif what == 'S':
+        ax.set_xlabel("Storage capacity [m3]")
+        t = "storage capacity"
+    elif what == 'N':
+        ax.set_xlabel("Number of tube trailers")
+        t = "number of tube trailers"
     
-    # axis[0, 1].boxplot(Ss)
-    # axis[0, 1].set_title(f"Best S : {np.mean(Ss)}")
+    fig.suptitle(f"Imact of the {t} on the LCOH") 
+    fig.show()
     
-    # axis[1, 0].boxplot(Ns)
-    # axis[1, 0].set_title(f"Best N : {np.mean(Ns)}")
     
-    # axis[1, 1].boxplot(LCOHs)
-    # axis[1, 1].set_title(f"Best LCOH : {np.mean(LCOHs)}")
+    fig, ax = plt.subplots()
     
-    # fig.show()
-    min_i = 0
-    for i in range(len(LCOHs)):
-        if LCOHs[i] == min(LCOHs):
-            min_i = i
-            break
+    ax.plot(r, wasted_H2s)
     
-    return [Cs, Ss, Ns, LCOHs], [Cs[min_i], Ss[min_i], Ns[min_i], min(LCOHs)]
+    ax.set_ylabel("Wasted hydrogen [%]")
+    if what == 'C':
+        ax.set_xlabel("Electrolyzer capacity [kW]")
+        t = "electrolyzer capacity"
+    elif what == 'S':
+        ax.set_xlabel("Storage capacity [m3]")
+        t = "storage capacity"
+    elif what == 'N':
+        ax.set_xlabel("Number of tube trailers")
+        t = "number of tube trailers"
+    
+    fig.suptitle(f"Imact of the {t} on the share of hydrogen wasted") 
+    fig.show()
+    
+    
+    fig, ax = plt.subplots()
+    
+    ax.plot(r, wasted_Ps)
+    
+    ax.set_ylabel("Wasted power [%]")
+    if what == 'C':
+        ax.set_xlabel("Electrolyzer capacity [kW]")
+        t = "electrolyzer capacity"
+    elif what == 'S':
+        ax.set_xlabel("Storage capacity [m3]")
+        t = "storage capacity"
+    elif what == 'N':
+        ax.set_xlabel("Number of tube trailers")
+        t = "number of tube trailers"
+    
+    fig.suptitle(f"Imact of the {t} on the share of power wasted") 
+    fig.show()
+    
+
 # %%

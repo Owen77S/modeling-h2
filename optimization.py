@@ -1,7 +1,10 @@
-ximport pandas as pd
+# %%
+import pandas as pd
 import numpy as np  
 import matplotlib.pyplot as plt
 import random
+
+# %%
 
 class H2plant():
     def __init__(self):
@@ -73,7 +76,7 @@ class H2plant():
             "threshold" : 0 #Threshold above which we start selling hydrogen 0 < T < 1 [1]
             }
         
-    def get_data_from_excel(self, nb = 104, path_excel = "data_2.xlsx"):
+    def get_data_from_excel(self, nb = 104, path_excel = "data_2.csv"):
         '''
         Get the parameters (wind and nuclear power plant production) from Excel
         Update self.data
@@ -83,7 +86,7 @@ class H2plant():
             The number of wind turbines in the wind plant.
             
         path_excel : str, optional
-            The excel file path. The default is "data_2.xlsx".
+            The excel file path. The default is "data_2.csv".
 
         Returns
         -------
@@ -91,10 +94,9 @@ class H2plant():
 
         '''
         
-        wind_nuclear = pd.read_excel("data_2.xlsx",
-                                     usecols = 'A:B')
+        wind_nuclear = pd.read_csv("data_2.csv", delimiter=";", decimal=',')
         
-        self.data["WP"] = [nb*power for power in wind_nuclear["Wind power [kW]"].tolist()]
+        self.data["WP"] = wind_nuclear["Wind power [kW]"].tolist()
         self.data["NP"] = wind_nuclear['Nuclear power plant [kW]'].tolist()
     
     
@@ -1560,9 +1562,212 @@ def algo(plant, len_pop, n_iter, C_min, C_max, S_min, S_max, N_min, N_max, print
     LCOHs.append(best_LCOH)
         
     best_config = sort_pop[0]
-    
+
     return best_config, best_LCOH, LCOHs, new_gene
- 
+
+def algo_with_tracking(plant, len_pop, n_iter, C_min, C_max, S_min, S_max, N_min, N_max, track_population=False, printed=0):
+    """
+    The genetic algorithm with population tracking for 3D visualization.
+
+    Parameters
+    ----------
+    plant : H2 plant.
+        A H2 plant. Suggestion : use the same H2 plant as the one used for sort_selection and initialization.
+    len_pop : int.
+        The length of the population (suggestion : around 40).
+    n_iter : int.
+        The number of iterations before providing the results (suggestion : around 50).
+
+    C_min, C_max, S_min, S_max, N_min, N_max are all int and represent the minimum/maximum value
+    that can take the electrolyzer capacity (C), the storage capacity (S), and
+    the number of trucks (N) of each member of the population.
+    track_population : bool. Default value = False
+        If True, captures all population data at each iteration for 3D visualization.
+    printed : int. Default value = 0
+        If printed = 0 : it won't print the progress of the function (recommended while doing a multiprocess).
+        Otherwise : it will.
+
+    Returns
+    -------
+    best_config : list.
+        The best member.
+    best_LCOH : float
+        The LCOH associated with the best member.
+    LCOHs : list
+        The list of LCOHs of all the members.
+    new_gene : list
+        The list of all the members of the last iteration.
+    all_iterations : list (only if track_population=True)
+        List of dictionaries containing population data for each iteration.
+
+    """
+    # When do we start crazy mutation
+    threshold_same_LCOH = 2
+    rank_digits_that_changes = 4
+    precision = 10**(-(rank_digits_that_changes-1))
+
+    # Initialisation
+    initial_pop = initialization(plant, len_pop, C_min, C_max, S_min, S_max, N_min, N_max, printed)
+    new_gene = initial_pop
+    LCOHs = []
+
+    # For tracking population evolution
+    all_iterations = [] if track_population else None
+
+    # Definition of a new generation
+
+    from_best = 1 # The number of best from the previous generation that stays in the new generation
+    mutation_of_from_best = 2 # The number of mutation of the from_best
+    child_per_best = 2 # The number of children from the best
+    from_init = 10 # From a new initialization
+    others = len_pop - from_best*(1 + mutation_of_from_best + child_per_best) - from_init # The others : childs from the remaining
+
+    # Probability defintions
+    p_crossover = 0.95
+    p_mutation = 0.75
+
+    # Compteur for crazy mutation
+    cpt_mut = 0
+
+    for k in range(n_iter):
+        # Sort + selection + improver step
+        sort_pop, sort_pop_LCOH, best_LCOH = sort_selection(plant, new_gene, 4, C_min, C_max, S_min, S_max, N_min, N_max)
+        best_config = sort_pop[0]
+        LCOHs.append(best_LCOH)
+
+        # Capture population data for 3D visualization
+        if track_population:
+            all_iterations.append({
+                'iteration': k,
+                'population': [member for member in sort_pop],
+                'lcoh_values': [lcoh for _, lcoh in sort_pop_LCOH],
+                'best_member': best_config.copy(),
+                'best_lcoh': best_LCOH
+            })
+
+        best_pop_LCOH = sort_pop_LCOH[:from_best]
+        new_gene = []
+
+        # If there are converge issues, we do a crazy mutation
+        last_LCOH = LCOHs[-threshold_same_LCOH:]
+
+        # We count how many times the LCOH has not varied more than a specific value (precision)
+        nb_time_same_LCOH = sum([LCOH - best_LCOH < precision for LCOH in last_LCOH])
+
+        # If the LCOH hasn't varied much for a long period of time, we do crazy mutation
+        if k >= threshold_same_LCOH and nb_time_same_LCOH == threshold_same_LCOH:
+                cpt_mut += 1
+                new_gene = crazy_mutation_3(plant, sort_pop[0], len_pop, C_min, C_max, S_min, S_max, N_min, N_max)
+                # new_gene = crazy_mutation(sort_pop[0], len_pop, 100, 10 ,C_min, C_max, S_min, S_max, N_min, N_max, C_rate, S_rate, N_rate)
+                # new_gene = crazy_mutation_2(plant, sort_pop[0], len_pop, 100, 15 ,C_min, C_max, S_min, S_max, N_min, N_max, C_rate, S_rate, N_rate, 0)
+                if cpt_mut == 20:
+                    # Too many crazy mutations, we can't find any better solution
+                    print("Fin prématuré")
+                    if track_population:
+                        return best_config, best_LCOH, LCOHs, new_gene, all_iterations
+                    else:
+                        return best_config, best_LCOH, LCOHs, new_gene
+                if printed != 0:
+                    print(f"{k+1}/{n_iter} iterations. CRAZY MUTATION Best LCOH : {best_LCOH}, best config {best_config}.")
+
+
+        # Else, we continue the classic generation creation
+        else:
+            cpt_mut = 0
+            # We add the best ONE in the new_gene
+            new_gene.append(sort_pop[0])
+
+            # We add mutations from THE best
+            p = new_gene[0]
+            for j in range(mutation_of_from_best):
+                muted = mutation_3(p, 10 ,C_min, C_max, S_min, S_max, N_min, N_max)
+                # muted = mutation_2(p, 2, 10, C_min, C_max, S_min, S_max, N_min, N_max, 0.05, 0.05, 0.05)
+                new_gene.append(muted)
+
+            # # We add the best ones
+            # for i in range(from_best):
+            #     new_gene.append(sort_pop[i])
+
+            # # print("We add the best ones ")
+            # # print(new_gene)
+            #
+
+            # # We add mutations from best
+            # # tmp = new_gene.copy()
+            # for i in range(from_best):
+            #     # p = tmp[i]
+            #     p = new_gene[i]
+            #     for j in range(mutation_of_from_best):
+            #         muted = mutation_3(p, 10 ,C_min, C_max, S_min, S_max, N_min, N_max)
+            #         # muted = mutation_2(p, 2, 10, C_min, C_max, S_min, S_max, N_min, N_max, 0.05, 0.05, 0.05)
+            #         new_gene.append(muted)
+
+            # print("We add mutations from best")
+            # print(new_gene)
+
+
+            # We add children from best
+            # tmp = new_gene.copy()
+            # for i in range(from_best):
+            p1 = best_pop_LCOH[0]
+            for j in range(child_per_best):
+                p2 = parent_selection_alea(sort_pop_LCOH)
+
+                # child = crossover_1(p1, p2, 10)
+                # child = crossover_2(p1, p2, 0.7, 10)
+                # child = crossover_3(p1, p2, 10)
+                child = crossover_4(p1, p2, 10)
+                new_gene.append(child)
+
+            # We add random members
+            pop = initialization(plant, from_init, C_min, C_max, S_min, S_max, S_min, S_max, 0)
+            new_gene += pop
+
+            # We add the others
+            for i in range(others):
+                p1 = parent_selection_alea(sort_pop_LCOH)
+                p2 = parent_selection_alea(sort_pop_LCOH)
+
+                # Crossover
+                # child = crossover_1(p1, p2, p_crossover)
+                # child = crossover_2(p1, p2, 0.7, p_crossover)
+                # child = crossover_3(p1, p2, p_crossover)
+                child = crossover_4(p1, p2, p_crossover)
+
+                # Mutation
+                # mut = mutation_2(child, p_mutation, 10, C_min, C_max, S_min, S_max, N_min, N_max, C_rate, S_rate, N_rate)
+                mut = mutation_3(child, p_mutation ,C_min, C_max, S_min, S_max, N_min, N_max)
+                # New child
+                new_gene.append(mut)
+
+                # print("We add the others")
+                # print(new_gene)
+
+            if printed != 0:
+                print(f"{k+1}/{n_iter} iterations. Best LCOH : {best_LCOH}, best config {best_config}.")
+
+            # print(f"{i+1}/{n_iter} iterations.")
+    # Sort step
+    sort_pop, sort_pop_LCOH, best_LCOH = sort_selection(plant, new_gene, 1, C_min, C_max, S_min, S_max, N_min, N_max)
+    LCOHs.append(best_LCOH)
+
+    # Capture final iteration
+    if track_population:
+        all_iterations.append({
+            'iteration': n_iter,
+            'population': [member for member in sort_pop],
+            'lcoh_values': [lcoh for _, lcoh in sort_pop_LCOH],
+            'best_member': sort_pop[0].copy(),
+            'best_lcoh': best_LCOH
+        })
+
+    best_config = sort_pop[0]
+
+    if track_population:
+        return best_config, best_LCOH, LCOHs, new_gene, all_iterations
+    else:
+        return best_config, best_LCOH, LCOHs, new_gene
+
 def optimization(plant, n_best_design, n_iter, len_pop, C_min, C_max, S_min, S_max, N_min, N_max, printed=1):
     """
     
@@ -1722,3 +1927,5 @@ def sensitivity(val_min, val_max, nb, what):
     fig.suptitle(f"Imact of the {t} on the share of power wasted") 
     fig.show()
     
+
+# %%
