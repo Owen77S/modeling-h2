@@ -9,6 +9,7 @@ Description: Démonstration de compétences en modélisation énergétique,
 """
 
 import streamlit as st
+from utils.image_loader import display_image
 
 # Configuration de la page principale
 st.set_page_config(
@@ -205,13 +206,7 @@ st.markdown("""
 """)
 
 # Afficher l'image de méthodologie
-try:
-    from PIL import Image
-    method_img = Image.open("method.png")
-    st.image(method_img, caption="Méthodologie de modélisation et optimisation")
-except Exception as e:
-    st.warning(f"Image de méthodologie non disponible: {e}")
-
+display_image("method.png", caption="Méthodologie de modélisation et optimisation")
 st.markdown("---")
 
 # 2. Optimisation interactive
