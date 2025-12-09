@@ -207,7 +207,7 @@ st.markdown("""
 # Afficher l'image de méthodologie
 try:
     from PIL import Image
-    method_img = Image.open("images/methodlogy chart without benchmarking.png")
+    method_img = Image.open("images/method.png")
     st.image(method_img, caption="Méthodologie de modélisation et optimisation")
 except Exception as e:
     st.warning(f"Image de méthodologie non disponible: {e}")

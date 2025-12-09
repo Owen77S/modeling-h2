@@ -90,9 +90,6 @@ with col4:
     - Optimisation multi-paramètres
     """)
 
-st.markdown("---")
-
-st.header("Méthodologie")
 
 
 
