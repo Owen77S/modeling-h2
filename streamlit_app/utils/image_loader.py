@@ -12,9 +12,7 @@ import os
 
 # Chemins des dossiers d'images
 IMAGE_DIRS = [
-    Path(__file__).parent.parent.parent.parent / "images",
-    Path(__file__).parent.parent.parent.parent / "images_ia",
-    Path(__file__).parent.parent / "assets",
+    Path(__file__).parent.parent / "images",
 ]
 
 # Extensions supportées

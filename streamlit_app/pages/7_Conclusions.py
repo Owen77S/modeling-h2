@@ -27,26 +27,13 @@ st.markdown("---")
 # Résumé des résultats
 st.header("Synthèse des résultats")
 
-col1, col2 = st.columns(2)
 
-with col1:
-    st.subheader("Configuration optimale")
+st.subheader("Performances atteintes")
 
-    st.markdown(f"""
-    | Paramètre | Valeur | Unité |
-    |-----------|--------|-------|
-    | **Capacité Électrolyseur** | {OPTIMAL_DESIGN['electrolyzer_capacity']:,} | kW |
-    | **Capacité Stockage** | {OPTIMAL_DESIGN['storage_capacity']} | m³ |
-    | **Nombre de Camions** | {OPTIMAL_DESIGN['number_of_trucks']} | - |
-    """)
-
-with col2:
-    st.subheader("Performances atteintes")
-
-    st.markdown(f"""
+st.markdown(f"""
     | KPI | Valeur | Objectif |
     |-----|--------|----------|
-    | **LCOH** | {OPTIMAL_DESIGN['LCOH']:.3f} €/kWh | Minimiser |
+    | **LCOH** | 0.145 €/kWh | Minimiser |
     | **H2 Annuel** | 3.0 kt | Maximiser |
     | **Pertes Puissance** | {OPTIMAL_DESIGN['wasted_power']*100:.1f}% | < 80% ✅ |
     | **Pertes H2** | {OPTIMAL_DESIGN['wasted_hydrogen']*100:.1f}% | < 80% ✅ |
@@ -54,14 +41,125 @@ with col2:
 
 st.markdown("---")
 
-# Enseignements clés
-st.header("💡 Enseignements Clés")
+# Discussion
+st.header("Discussion")
+
+col1, col2 = st.columns([1, 1])
+
+with col1:
+    st.markdown("""
+    ### Point de vue de la centrale hydrogène
+
+    Du point de vue de la centrale hydrogène, il peut être **bénéfique d'installer une centrale de production d'hydrogène**
+    lorsque la différence entre la capacité des centrales électriques et la limite du réseau est élevée.
+
+    **Cependant**, d'un point de vue plus large, il peut être **plus pertinent de dimensionner correctement les centrales
+    électriques** en fonction de la limite du réseau, car l'ajout d'une centrale hydrogène devrait être considéré comme
+    **un moyen d'améliorer l'efficacité** des centrales électriques, plutôt que comme un moyen de résoudre des problèmes
+    de surdimensionnement.
+    """)
+
+with col2:
+    st.markdown("""
+    ### Cas de l'hybridation nucléaire-éolien
+
+    Dans le cas de l'hybridation d'une centrale nucléaire avec un parc éolien, **collecter la puissance excédentaire
+    avec une centrale hydrogène peut valoir le coup**, en particulier si la centrale est de **grande taille**.
+
+    **Avantages :**
+    - Valorisation de l'électricité excédentaire
+    - Production d'hydrogène vert
+    - Amélioration de l'efficacité globale du système
+    - Réduction des risques de congestion du réseau
+    """)
+
+st.markdown("---")
+
+# Aspects de durabilité
+st.header("Aspects de durabilité")
+
+st.markdown("""
+L'hydrogène est de plus en plus utilisé dans la transition énergétique. Cependant, l'expansion de la production
+d'hydrogène a également des **conséquences environnementales et sociales**.
+
+Le projet est situé près de la centrale nucléaire d'Oskarshamn en Suède, à proximité de la mer et de la forêt.
+Il est nécessaire d'explorer les **impacts du projet** sur l'environnement, les ressources en eau, les terres et
+les objectifs de développement durable (ODD).
+""")
+
+st.subheader("Contribution aux Objectifs de Développement Durable (ODD)")
+
+# Créer des cartes pour les ODD
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown("""
+    <div style='background: #4C9FEB; padding: 15px; border-radius: 10px; color: white;'>
+        <h4>🚰 ODD 6 - Eau propre et assainissement</h4>
+        <p style='font-size: 0.9em;'>
+        <b>Impact :</b> La production d'hydrogène nécessite la consommation de grandes quantités d'eau.
+        Bien que la Suède dispose de ressources en eau abondantes, <b>la menace potentielle</b> pour les ressources
+        en eau de la production d'hydrogène doit être prise en compte.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("")
+
+    st.markdown("""
+    <div style='background: #56C02B; padding: 15px; border-radius: 10px; color: white;'>
+        <h4>⚡ ODD 13 - Lutte contre les changements climatiques</h4>
+        <p style='font-size: 0.9em;'>
+        <b>Impact positif :</b> En tant que ressource propre, la combustion de l'hydrogène ne produit
+        <b>aucun gaz nocif pour l'environnement</b>.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col2:
+    st.markdown("""
+    <div style='background: #FCC30B; padding: 15px; border-radius: 10px; color: white;'>
+        <h4>💡 ODD 7 - Énergie propre et abordable</h4>
+        <p style='font-size: 0.9em;'>
+        <b>Double avantage :</b>
+        <br>1. Vendre l'hydrogène augmente les revenus des producteurs d'électricité et réduit le gaspillage
+        <br>2. L'hydrogène peut être utilisé pour produire de l'électricité en cas de manque, facilitant l'accès à plus d'électricité
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col3:
+    st.markdown("""
+    <div style='background: #FD6925; padding: 15px; border-radius: 10px; color: white;'>
+        <h4>🏭 ODD 9 - Industrie, innovation et infrastructure</h4>
+        <p style='font-size: 0.9em;'>
+        <b>Impact positif :</b> L'expansion des centrales hydrogène pourrait faciliter le développement
+        d'<b>infrastructures industrielles scientifiques et technologiques</b> pour la production d'hydrogène.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("")
+
+    st.markdown("""
+    <div style='background: #3F7E44; padding: 15px; border-radius: 10px; color: white;'>
+        <h4>🌲 ODD 15 - Vie terrestre</h4>
+        <p style='font-size: 0.9em;'>
+        <b>Préoccupation :</b> L'expansion des centrales de production d'hydrogène peut entrer en conflit avec
+        l'utilisation des terres. La centrale est entourée de forêts, et <b>les dommages potentiels</b> aux terres
+        forestières et l'impact sur les animaux vivant dans les forêts doivent être pris en compte.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.markdown("---")
+
 
 col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("""
-    ### Points Forts du Projet
+    ### Points forts du projet
 
     **1. Modélisation Complète**
     - Simulation horaire réaliste (8760 h)
@@ -81,19 +179,19 @@ with col1:
 
 with col2:
     st.markdown("""
-    ### Résultats Majeurs
+    ### Résultats majeurs
 
-    **1. LCOH Compétitif**
-    - 0.165 €/kWh (~5.5 €/kg)
+    **1. LCOH compétitif**
+    - 0.145 €/kWh
     - Proche des objectifs EU 2030
     - Viable économiquement
 
-    **2. Valorisation Efficace**
+    **2. Valorisation efficace**
     - 98% de l'H2 produit est vendu
     - Gestion optimale du stockage
     - Logistique de transport adaptée
 
-    **3. Dimensionnement Équilibré**
+    **3. Dimensionnement équilibré**
     - Électrolyseur adapté aux excédents
     - Stockage suffisant sans surdimensionnement
     - Flotte de camions optimisée
@@ -102,12 +200,12 @@ with col2:
 st.markdown("---")
 
 # Limitations
-st.header("⚠️ Limitations et Hypothèses")
+st.header("Limitations et hypothèses")
 
 st.markdown("""
-### Simplifications du Modèle
+### Simplifications du modèle
 
-| Aspect | Simplification | Impact Potentiel |
+| Aspect | Simplification | Impact potentiel |
 |--------|----------------|------------------|
 | **Dégradation** | Non modélisée dynamiquement | Sous-estimation LCOH à long terme |
 | **Prix H2** | Fixe à 2.7 €/kg | Sensible aux fluctuations du marché |
@@ -128,38 +226,23 @@ st.markdown("---")
 # Perspectives
 st.header("🔮 Perspectives et Améliorations")
 
-tab1, tab2, tab3 = st.tabs(["🔧 Améliorations Techniques", "📊 Extensions du Modèle", "🎯 Applications"])
+tab1, tab2 = st.tabs(["Améliorations techniques", "Extensions du modèle"])
 
 with tab1:
     col1, col2 = st.columns(2)
 
     with col1:
         st.markdown("""
-        ### Court Terme
-
         - **Optimisation multi-objectif**
           - Pareto LCOH vs Production
           - Trade-offs visuels
 
-        - **Algorithmes alternatifs**
-          - Particle Swarm Optimization
-          - Simulated Annealing
-          - Bayesian Optimization
-
         - **Parallélisation**
-          - Évaluation multi-thread
-          - Réduction temps de calcul
+          - Évaluation multi-process pour réduction de temps de calcul
         """)
 
     with col2:
         st.markdown("""
-        ### Moyen Terme
-
-        - **Interface avancée**
-          - Sauvegarde de scénarios
-          - Comparaison multi-configs
-          - Rapports automatiques
-
         - **Intégration données réelles**
           - API météo temps réel
           - Prix marché dynamiques
@@ -172,99 +255,38 @@ with tab1:
 
 with tab2:
     st.markdown("""
-    ### Extensions Possibles du Modèle
+    ### Extensions possibles du modèle
 
-    **1. Modélisation plus fine de l'électrolyseur**
-    - Courbe de rendement complète
-    - Dégradation dynamique
-    - Temps de démarrage/arrêt
-    - Modes de fonctionnement (standby, hot standby)
+    **1. Modélisation plus fine de l'électrolyseur** 
+    - **Courbe de rendement complète** : La puissance fournie à l'électrolyseur n'est pas constante,
+      ce qui aura nécessairement un impact sur son efficacité et sa durée de vie
+    - **Dégradation dynamique** : Le modèle actuel ne considère pas les principales pertes du dispositif
+    - **Temps de démarrage/arrêt** : Impact sur la production réelle
+    - **Modes de fonctionnement** : standby, hot standby
 
     **2. Stockage avancé**
+    - **Développer un modèle propre** pour le stockage d'hydrogène
     - Différentes technologies (réservoirs, cavernes)
     - Pertes de stockage (boil-off)
-    - Coûts différenciés
+    - Coûts différenciés selon la technologie
 
     **3. Transport multi-modal**
-    - Pipelines
-    - Différents types de camions
-    - Optimisation des routes
+    - **Pipelines** : Pour livrer l'hydrogène gazeux si la production et la demande sont élevées
+    - Les pipelines d'hydrogène sont très courants dans les régions à forte demande (comme le Gulf Coast)
+    - Méthode rentable pour la livraison à grande échelle s'il existe des pipelines
+    - Différents types de camions et optimisation des routes
 
-    **4. Couplage au réseau électrique**
-    - Services système
-    - Participation au marché
-    - Flexibilité valorisée
+    **4. Analyse de sensibilité étendue**
+    - **Analyse de sensibilité sur les deux contraintes** (électricité et hydrogène gaspillés)
+      pour voir comment elles impactent les KPIs
+    - Contraintes variables dans le temps
 
-    **5. Analyse de cycle de vie**
-    - Empreinte carbone
-    - Analyse environnementale complète
+    **5. Loi empirique**
+    - **Obtenir une loi empirique** pour calculer les différentes variables optimisées
+    - Permettrait un dimensionnement rapide sans optimisation complète
+
+
     """)
-
-with tab3:
-    st.markdown("""
-    ### Applications Industrielles
-
-    **1. Études de faisabilité**
-    - Dimensionnement préliminaire
-    - Analyse de rentabilité
-    - Comparaison de sites
-
-    **2. Aide à la décision**
-    - Choix technologiques
-    - Planification d'investissement
-    - Analyse de risque
-
-    **3. Recherche et développement**
-    - Test de nouvelles configurations
-    - Évaluation de technologies émergentes
-    - Benchmarking
-
-    **4. Formation**
-    - Compréhension des systèmes H2
-    - Sensibilisation aux enjeux
-    - Démonstration interactive
-    """)
-
-st.markdown("---")
-
-# Compétences démontrées
-st.header("Compétences")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.markdown("""
-    ### Modélisation
-
-    - Physique des systèmes énergétiques
-    - Thermodynamique des gaz
-    - Économie de l'énergie
-    - Simulation temporelle
-    """)
-
-with col2:
-    st.markdown("""
-    ### Programmation
-
-    - Python avancé
-    - Programmation orientée objet
-    - Calcul scientifique (NumPy)
-    - Visualisation (Plotly)
-    - Applications web (Streamlit)
-    - Visualisation complexe (3D)
-    - Multiprocessing
-    """)
-
-with col3:
-    st.markdown("""
-    ### Optimisation
-
-    - Algorithmes évolutionnaires
-    - Méta-heuristiques
-    - Analyse de sensibilité
-    - Analyse de Monte-Carlo
-    """)
-
 
 
 # Footer

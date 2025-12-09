@@ -158,6 +158,9 @@ dans un espace 3D, où chaque point représente un design possible de la central
 - **Axe Y** : Capacité de stockage [m³]
 - **Axe Z** : Nombre de camions
 - **Couleur** : LCOH (rouge = mauvais, vert = bon)
+
+Le formulaire à gauche permet de modifier les paramètres de l'algorithme génétique. **La taille de la population et le
+nombre d'itérations maximum ont été réduit pour favoriser un rendu rapide.**
 """)
 
 # Boutons de contrôle principaux
@@ -253,137 +256,131 @@ if st.session_state.ga_3d_results is not None and len(st.session_state.ga_3d_res
         st.metric("N", current_data['best_member'][2])
 
 else:
-    st.info("👆 Cliquez sur 'Lancer l'optimisation' pour démarrer la visualisation")
+    st.info("Cliquez sur 'Lancer l'optimisation' pour démarrer la visualisation")
 
 st.markdown("---")
 
 # Évolution des paramètres
 st.subheader("Évolution des paramètres")
 
-# Extraire l'historique des meilleurs membres
-C_history = [it['best_member'][0] for it in st.session_state.ga_3d_results]
-S_history = [it['best_member'][1] for it in st.session_state.ga_3d_results]
-N_history = [it['best_member'][2] for it in st.session_state.ga_3d_results]
+st.markdown('''**IMPORTANT** : l'algorithme risque de ne pas converger vers la solution optimale car la taille de la population et le nombre de générations sont faibles
+pour favoriser une expérience utilisateur agréable.''')
+# Vérifier que les données existent
+if st.session_state.ga_3d_results is not None and len(st.session_state.ga_3d_results) > 0:
+    # Extraire l'historique des meilleurs membres
+    C_history = [it['best_member'][0] for it in st.session_state.ga_3d_results]
+    S_history = [it['best_member'][1] for it in st.session_state.ga_3d_results]
+    N_history = [it['best_member'][2] for it in st.session_state.ga_3d_results]
 
-col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2)
 
-# Graphe d'évolution du LCOH
-fig_lcoh = go.Figure()
-fig_lcoh.add_trace(go.Scatter(
-    x=list(range(len(st.session_state.ga_3d_lcoh_history))),
-    y=st.session_state.ga_3d_lcoh_history,
-    mode='lines+markers',
-    name='LCOH',
-    line=dict(color='#1f77b4', width=2),
-    marker=dict(size=3)
-))
-fig_lcoh.add_trace(go.Scatter(
-    x=[current],
-    y=[st.session_state.ga_3d_lcoh_history[current]],
-    mode='markers',
-    marker=dict(size=8, color='red', symbol='diamond')
-))
-fig_lcoh.update_layout(
-    xaxis_title="Itération",
-    yaxis_title="LCOH [€/kWh]",
-    template="plotly_white",
-    height=200,
-    showlegend=False,
-    margin=dict(l=10, r=10, t=10, b=30)
-)
-with col1:
-    st.plotly_chart(fig_lcoh, width='stretch')
+    # Graphe d'évolution du LCOH
+    fig_lcoh = go.Figure()
+    fig_lcoh.add_trace(go.Scatter(
+        x=list(range(len(st.session_state.ga_3d_lcoh_history))),
+        y=st.session_state.ga_3d_lcoh_history,
+        mode='lines+markers',
+        name='LCOH',
+        line=dict(color='#1f77b4', width=2),
+        marker=dict(size=3)
+    ))
+    fig_lcoh.add_trace(go.Scatter(
+        x=[current],
+        y=[st.session_state.ga_3d_lcoh_history[current]],
+        mode='markers',
+        marker=dict(size=8, color='red', symbol='diamond')
+    ))
+    fig_lcoh.update_layout(
+        xaxis_title="Itération",
+        yaxis_title="LCOH [€/kWh]",
+        template="plotly_white",
+        height=200,
+        showlegend=False,
+        margin=dict(l=10, r=10, t=10, b=30)
+    )
+    with col1:
+        st.plotly_chart(fig_lcoh, width='stretch')
 
-# Graphe d'évolution de C
-fig_c = go.Figure()
-fig_c.add_trace(go.Scatter(
-    x=list(range(len(C_history))),
-    y=C_history,
-    mode='lines+markers',
-    line=dict(color='#ff7f0e', width=2),
-    marker=dict(size=3)
-))
-fig_c.add_trace(go.Scatter(
-    x=[current],
-    y=[C_history[current]],
-    mode='markers',
-    marker=dict(size=8, color='red', symbol='diamond')
-))
-fig_c.update_layout(
-    xaxis_title="Itération",
-    yaxis_title="C [kW]",
-    template="plotly_white",
-    height=200,
-    showlegend=False,
-    margin=dict(l=10, r=10, t=10, b=30)
-)
-with col1:
-    st.plotly_chart(fig_c, width='stretch')
+    # Graphe d'évolution de C
+    fig_c = go.Figure()
+    fig_c.add_trace(go.Scatter(
+        x=list(range(len(C_history))),
+        y=C_history,
+        mode='lines+markers',
+        line=dict(color='#ff7f0e', width=2),
+        marker=dict(size=3)
+    ))
+    fig_c.add_trace(go.Scatter(
+        x=[current],
+        y=[C_history[current]],
+        mode='markers',
+        marker=dict(size=8, color='red', symbol='diamond')
+    ))
+    fig_c.update_layout(
+        xaxis_title="Itération",
+        yaxis_title="C [kW]",
+        template="plotly_white",
+        height=200,
+        showlegend=False,
+        margin=dict(l=10, r=10, t=10, b=30)
+    )
+    with col1:
+        st.plotly_chart(fig_c, width='stretch')
 
-# Graphe d'évolution de S
-fig_s = go.Figure()
-fig_s.add_trace(go.Scatter(
-    x=list(range(len(S_history))),
-    y=S_history,
-    mode='lines+markers',
-    line=dict(color='#2ca02c', width=2),
-    marker=dict(size=3)
-))
-fig_s.add_trace(go.Scatter(
-    x=[current],
-    y=[S_history[current]],
-    mode='markers',
-    marker=dict(size=8, color='red', symbol='diamond')
-))
-fig_s.update_layout(
-    xaxis_title="Itération",
-    yaxis_title="S [m³]",
-    template="plotly_white",
-    height=200,
-    showlegend=False,
-    margin=dict(l=10, r=10, t=10, b=30)
-)
-with col2:
-    st.plotly_chart(fig_s, width='stretch')
+    # Graphe d'évolution de S
+    fig_s = go.Figure()
+    fig_s.add_trace(go.Scatter(
+        x=list(range(len(S_history))),
+        y=S_history,
+        mode='lines+markers',
+        line=dict(color='#2ca02c', width=2),
+        marker=dict(size=3)
+    ))
+    fig_s.add_trace(go.Scatter(
+        x=[current],
+        y=[S_history[current]],
+        mode='markers',
+        marker=dict(size=8, color='red', symbol='diamond')
+    ))
+    fig_s.update_layout(
+        xaxis_title="Itération",
+        yaxis_title="S [m³]",
+        template="plotly_white",
+        height=200,
+        showlegend=False,
+        margin=dict(l=10, r=10, t=10, b=30)
+    )
+    with col2:
+        st.plotly_chart(fig_s, width='stretch')
 
-# Graphe d'évolution de N
-fig_n = go.Figure()
-fig_n.add_trace(go.Scatter(
-    x=list(range(len(N_history))),
-    y=N_history,
-    mode='lines+markers',
-    line=dict(color='#d62728', width=2),
-    marker=dict(size=3)
-))
-fig_n.add_trace(go.Scatter(
-    x=[current],
-    y=[N_history[current]],
-    mode='markers',
-    marker=dict(size=8, color='red', symbol='diamond')
-))
-fig_n.update_layout(
-    xaxis_title="Itération",
-    yaxis_title="N",
-    template="plotly_white",
-    height=200,
-    showlegend=False,
-    margin=dict(l=10, r=10, t=10, b=30)
-)
-with col2:
-    st.plotly_chart(fig_n, width='stretch')
+    # Graphe d'évolution de N
+    fig_n = go.Figure()
+    fig_n.add_trace(go.Scatter(
+        x=list(range(len(N_history))),
+        y=N_history,
+        mode='lines+markers',
+        line=dict(color='#d62728', width=2),
+        marker=dict(size=3)
+    ))
+    fig_n.add_trace(go.Scatter(
+        x=[current],
+        y=[N_history[current]],
+        mode='markers',
+        marker=dict(size=8, color='red', symbol='diamond')
+    ))
+    fig_n.update_layout(
+        xaxis_title="Itération",
+        yaxis_title="N",
+        template="plotly_white",
+        height=200,
+        showlegend=False,
+        margin=dict(l=10, r=10, t=10, b=30)
+    )
+    with col2:
+        st.plotly_chart(fig_n, width='stretch')
 
-st.markdown("---")
+    st.markdown("---")
 
-st.subheader("Configuration optimale")
-
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("Capacité électrolyseurs [kW]", "49161")
-with col2:
-    st.metric("Capacité stockage [m³]", "326")
-with col3:
-    st.metric("Nombre de camions", "11")
-with col4:
-    st.metric("LCOH [€/kWh]", "0.165")
-
-st.session_state.ga_3d_best_config = [49161, 326, 11]
+    st.session_state.ga_3d_best_config = [49161, 326, 11]
+else:
+    st.info("Lancez l'optimisation pour voir l'évolution des paramètres")

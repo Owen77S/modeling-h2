@@ -92,22 +92,9 @@ with col4:
 
 st.markdown("---")
 
-st.header("Techniques")
+st.header("Méthodologie")
 
-col1, col2 = st.columns(2) 
 
-with col1:
-    st.markdown("###### Modélisation technique et économique des centrales et réseau électrique")
-    st.markdown("###### Analyse de sensitivité")
-
-with col2:
-    st.markdown("###### Optimisation multi-paramètres sous contraintes avec algorithme génétique")
-    st.markdown("###### Analyse de Monte-Carlo pour estimation d'incertitudes")
-
-st.markdown("---")
-
-# Objectifs du projet
-st.header("Objectifs du Projet")
 
 # Footer
 st.markdown("---")
